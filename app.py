@@ -4,14 +4,6 @@ Provides a user-friendly web interface for spam detection
 """
 
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response
-from spam_classifier import SpamClassifier
-from db import (
-    init_db,
-    save_prediction,
-    get_prediction_logs,
-    count_prediction_logs,
-    get_prediction_logs_for_export,
-)
 import os
 from datetime import datetime
 import json
@@ -21,28 +13,63 @@ from io import StringIO
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# Initialize classifier
-classifier = SpamClassifier()
+# Defaults are set first so routes can still run even if imports fail on serverless.
+classifier = None
 model_loaded = False
 db_ready = False
+db_functions_available = False
+startup_errors = []
+
+# Placeholders so names always exist for route handlers and tests.
+init_db = None
+save_prediction = None
+get_prediction_logs = None
+count_prediction_logs = None
+get_prediction_logs_for_export = None
+
+# Import database helpers lazily and safely.
+try:
+    from db import (
+        init_db,
+        save_prediction,
+        get_prediction_logs,
+        count_prediction_logs,
+        get_prediction_logs_for_export,
+    )
+    db_functions_available = True
+except Exception as e:
+    startup_errors.append(f"DB import error: {e}")
+    print(f"✗ Warning: Could not import database helpers: {e}")
+
+# Import ML classifier lazily and safely.
+try:
+    from spam_classifier import SpamClassifier
+    classifier = SpamClassifier()
+except Exception as e:
+    startup_errors.append(f"ML import error: {e}")
+    print(f"✗ Warning: Could not import spam classifier: {e}")
 
 # Try to initialize database on startup
-try:
-    init_db()
-    db_ready = True
-    print("✓ Database connected and table is ready!")
-except Exception as e:
-    print(f"✗ Warning: Could not initialize database: {e}")
-    print("  Prediction logging is disabled until DATABASE_URL is configured correctly.")
+if db_functions_available and init_db is not None:
+    try:
+        init_db()
+        db_ready = True
+        print("✓ Database connected and table is ready!")
+    except Exception as e:
+        startup_errors.append(f"DB init error: {e}")
+        print(f"✗ Warning: Could not initialize database: {e}")
+        print("  Prediction logging is disabled until DATABASE_URL is configured correctly.")
 
 # Try to load the model on startup
-try:
-    classifier.load_model()
-    model_loaded = True
-    print("✓ Model loaded successfully!")
-except Exception as e:
-    print(f"✗ Warning: Could not load model: {e}")
-    print("  Please run 'python spam_classifier.py' first to train the model.")
+if classifier is not None:
+    try:
+        classifier.load_model()
+        model_loaded = True
+        print("✓ Model loaded successfully!")
+    except Exception as e:
+        startup_errors.append(f"Model load error: {e}")
+        print(f"✗ Warning: Could not load model: {e}")
+        print("  Please run 'python spam_classifier.py' first to train the model.")
 
 
 @app.route('/')
@@ -313,6 +340,9 @@ def health_check():
     """Health check endpoint"""
     return jsonify({
         'status': 'healthy' if model_loaded else 'model_not_loaded',
+        'model_loaded': model_loaded,
+        'db_ready': db_ready,
+        'startup_errors': startup_errors,
         'timestamp': datetime.now().isoformat()
     })
 
