@@ -1,0 +1,8 @@
+{
+  "name": "spam-message-identifier-src-fallback",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "cd .. && ((python3 -m pip install -r requirements.txt || python -m pip install -r requirements.txt) && (python3 -m gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120 || python -m gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120))"
+  }
+}
