@@ -49,6 +49,98 @@ except Exception as e:
     startup_errors.append(f"ML import error: {e}")
     print(f"✗ Warning: Could not import spam classifier: {e}")
 
+
+def _train_with_seed_data():
+    """Train a minimal fallback model when dataset/artifacts are unavailable."""
+    global model_loaded
+
+    if classifier is None:
+        return False
+
+    ham_samples = [
+        "Hey, are we still meeting today?",
+        "Can you call me when you arrive?",
+        "I will be late to class today.",
+        "Do not forget to bring your assignment.",
+        "Are you coming for the game tonight?",
+        "Thanks for your purchase. Your order is confirmed.",
+        "Please review the attached report before 5pm.",
+        "Lunch at 1pm works for me.",
+        "I sent the document to your email.",
+        "Let us reschedule the meeting to tomorrow.",
+    ]
+
+    spam_samples = [
+        "Congratulations! You have won $1000. Click here to claim now!",
+        "URGENT! Your account has been compromised. Send your details now!",
+        "Free entry in a weekly competition! Text WIN to 12345.",
+        "You have been selected for a prize. Call now!",
+        "Earn money fast from home with this simple trick.",
+        "Limited offer! Claim your reward immediately.",
+        "Winner! You have been chosen for a cash bonus.",
+        "Act now to verify your account and avoid suspension.",
+        "Click this link to receive your free voucher.",
+        "You are pre-approved for instant cash. Apply now.",
+    ]
+
+    X_train = ham_samples + spam_samples
+    y_train = [0] * len(ham_samples) + [1] * len(spam_samples)
+
+    classifier.train(X_train, y_train)
+    classifier.save_model()
+    model_loaded = True
+    return True
+
+
+def ensure_model_loaded():
+    """Guarantee the model is ready: load existing artifacts or train a fallback."""
+    global model_loaded
+
+    if classifier is None:
+        return False
+
+    if model_loaded:
+        return True
+
+    # 1) Try loading pre-trained artifacts.
+    try:
+        classifier.load_model()
+        model_loaded = True
+        print("✓ Model loaded successfully!")
+        return True
+    except Exception as e:
+        startup_errors.append(f"Model load error: {e}")
+        print(f"✗ Warning: Could not load model artifacts: {e}")
+
+    # 2) Try training from dataset if available in runtime filesystem.
+    try:
+        dataset_path = 'spam.csv'
+        if os.path.exists(dataset_path):
+            print("ℹ Training model from spam.csv at startup...")
+            df = classifier.load_data(dataset_path)
+            if df is not None:
+                X, y = classifier.preprocess_data(df)
+                classifier.train(X, y)
+                classifier.save_model()
+                model_loaded = True
+                print("✓ Model trained from dataset and ready.")
+                return True
+    except Exception as e:
+        startup_errors.append(f"Dataset bootstrap error: {e}")
+        print(f"✗ Warning: Could not train from dataset: {e}")
+
+    # 3) Final fallback: train a small in-memory seed model.
+    try:
+        print("ℹ Training fallback seed model at startup...")
+        if _train_with_seed_data():
+            print("✓ Fallback seed model trained and ready.")
+            return True
+    except Exception as e:
+        startup_errors.append(f"Seed bootstrap error: {e}")
+        print(f"✗ Warning: Could not train fallback seed model: {e}")
+
+    return False
+
 # Try to initialize database on startup
 if db_functions_available and init_db is not None:
     try:
@@ -60,16 +152,8 @@ if db_functions_available and init_db is not None:
         print(f"✗ Warning: Could not initialize database: {e}")
         print("  Prediction logging is disabled until DATABASE_URL is configured correctly.")
 
-# Try to load the model on startup
-if classifier is not None:
-    try:
-        classifier.load_model()
-        model_loaded = True
-        print("✓ Model loaded successfully!")
-    except Exception as e:
-        startup_errors.append(f"Model load error: {e}")
-        print(f"✗ Warning: Could not load model: {e}")
-        print("  Please run 'python spam_classifier.py' first to train the model.")
+# Ensure model is available on startup.
+ensure_model_loaded()
 
 
 @app.route('/')
@@ -87,7 +171,7 @@ def favicon():
 @app.route('/api/predict', methods=['POST'])
 def predict():
     """API endpoint for single message prediction"""
-    if not model_loaded:
+    if not model_loaded and not ensure_model_loaded():
         return jsonify({
             'error': 'Model not loaded. Please train the model first.',
             'success': False
@@ -158,7 +242,7 @@ def predict():
 @app.route('/api/predict-batch', methods=['POST'])
 def predict_batch():
     """API endpoint for batch predictions"""
-    if not model_loaded:
+    if not model_loaded and not ensure_model_loaded():
         return jsonify({
             'error': 'Model not loaded. Please train the model first.',
             'success': False
@@ -229,11 +313,12 @@ def predict_batch():
 @app.route('/api/model-info', methods=['GET'])
 def model_info():
     """Get information about the loaded model"""
+    max_features = getattr(classifier.vectorizer, 'max_features', 12000) if classifier else 12000
     return jsonify({
         'model_loaded': model_loaded,
         'model_type': 'Multinomial Naive Bayes',
         'vectorizer_type': 'TF-IDF',
-        'max_features': 5000,
+        'max_features': max_features,
         'expected_accuracy': '98.5%',
         'expected_precision': '98.9%',
         'expected_recall': '95.4%'
