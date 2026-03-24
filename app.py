@@ -88,8 +88,8 @@ def _train_with_seed_data():
 
     classifier.train(X_train, y_train)
     classifier.save_model()
-    model_loaded = True
-    return True
+    model_loaded = bool(getattr(classifier, 'is_trained', False))
+    return model_loaded
 
 
 def ensure_model_loaded():
@@ -105,6 +105,8 @@ def ensure_model_loaded():
     # 1) Try loading pre-trained artifacts.
     try:
         classifier.load_model()
+        if not getattr(classifier, 'is_trained', False):
+            raise RuntimeError('Model artifacts could not be loaded')
         model_loaded = True
         print("✓ Model loaded successfully!")
         return True
@@ -122,9 +124,9 @@ def ensure_model_loaded():
                 X, y = classifier.preprocess_data(df)
                 classifier.train(X, y)
                 classifier.save_model()
-                model_loaded = True
+                model_loaded = bool(getattr(classifier, 'is_trained', False))
                 print("✓ Model trained from dataset and ready.")
-                return True
+                return model_loaded
     except Exception as e:
         startup_errors.append(f"Dataset bootstrap error: {e}")
         print(f"✗ Warning: Could not train from dataset: {e}")
