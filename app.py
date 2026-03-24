@@ -94,8 +94,11 @@ def predict():
         }), 503
 
     try:
-        data = request.json
-        message = data.get('message', '').strip()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Invalid JSON payload', 'success': False}), 400
+
+        message = str(data.get('message', '')).strip()
 
         if not message:
             return jsonify({'error': 'Message cannot be empty', 'success': False}), 400
@@ -104,6 +107,11 @@ def predict():
             return jsonify({'error': 'Message too long (max 500 characters)', 'success': False}), 400
 
         result = classifier.predict(message)
+        if not isinstance(result, dict):
+            return jsonify({'error': 'Prediction model unavailable', 'success': False}), 503
+
+        if 'spam_probability' not in result or 'ham_probability' not in result or 'label' not in result:
+            return jsonify({'error': 'Invalid prediction output', 'success': False}), 500
 
         # Determine risk level
         spam_prob = result['spam_probability']
@@ -157,8 +165,15 @@ def predict_batch():
         }), 503
 
     try:
-        data = request.json
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Invalid JSON payload', 'success': False}), 400
+
         messages = data.get('messages', [])
+        if not isinstance(messages, list):
+            return jsonify({'error': 'messages must be an array', 'success': False}), 400
+
+        messages = [str(msg).strip() for msg in messages if str(msg).strip()]
 
         if not messages:
             return jsonify({'error': 'No messages provided', 'success': False}), 400
@@ -167,12 +182,20 @@ def predict_batch():
             return jsonify({'error': 'Too many messages (max 100)', 'success': False}), 400
 
         results = classifier.predict_batch(messages)
+        if not isinstance(results, list):
+            return jsonify({'error': 'Prediction model unavailable', 'success': False}), 503
 
         predictions = []
         spam_count = 0
         ham_count = 0
 
         for msg, result in zip(messages, results):
+            if not isinstance(result, dict):
+                continue
+
+            if 'label' not in result or 'spam_probability' not in result or 'ham_probability' not in result:
+                continue
+
             if result['label'] == 'SPAM':
                 spam_count += 1
             else:
@@ -184,6 +207,9 @@ def predict_batch():
                 'spam_probability': round(result['spam_probability'], 4),
                 'ham_probability': round(result['ham_probability'], 4)
             })
+
+        if not predictions:
+            return jsonify({'error': 'No valid predictions produced', 'success': False}), 500
 
         return jsonify({
             'success': True,

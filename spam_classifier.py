@@ -24,8 +24,15 @@ class SpamClassifier:
 
     def __init__(self):
         # We clean text manually first, then vectorize cleaned text.
-        self.vectorizer = TfidfVectorizer(max_features=5000, stop_words='english', lowercase=True)
-        self.classifier = MultinomialNB()
+        self.vectorizer = TfidfVectorizer(
+            max_features=12000,
+            ngram_range=(1, 2),
+            min_df=1,
+            max_df=0.95,
+            stop_words='english',
+            lowercase=True,
+        )
+        self.classifier = MultinomialNB(alpha=0.1, fit_prior=True)
         self.stop_words = set(ENGLISH_STOP_WORDS)
         self.is_trained = False
 
